@@ -2,61 +2,60 @@ package main
 
 import (
 	"crypto/md5"
+	"encoding/json"
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"io/ioutil"
 	"os"
+	"strconv"
+	"sync"
 )
+
+type mpStruct struct {
+	ChunkList []string `json:"chunkList"`
+	State     int      `json:"state"`
+}
+
+var rwLock sync.RWMutex
 
 func main() {
 	router := gin.Default()
-
 	router.Use(Cors)
+	// 获取缓存信息
 	router.GET("/checkChunk", func(c *gin.Context) {
 		hash := c.Query("hash")
-		fileName := c.Query("filename")
-		hashPath := fmt.Sprintf("./uploadFile/%s", hash)
-
-		chunkList := []string{}
-		isExistPath, err := PathExists(hashPath) //判断文件夹是否已经存在
+		//fileName := c.Query("filename")
+		hashPath := fmt.Sprintf("./uploadFile/%s", hash) // 缓存文件夹
+		mpJsonPath := fmt.Sprintf("%s/%s", hashPath, "mp.json")
+		isExistJson, err := PathExists(mpJsonPath)
 		if err != nil {
 			fmt.Println("获取hash路径错误", err)
 		}
-
-		if isExistPath {
-
-			files, err := ioutil.ReadDir(hashPath)
-			state := 0
+		if isExistJson {
+			// 读取json
+			bytes, err := ioutil.ReadFile(mpJsonPath)
 			if err != nil {
-				fmt.Println("文件读取错误", err)
+				fmt.Println("读取json文件失败", err)
+				return
 			}
-
-			//fmt.Println(mpList)
-
-			for _, f := range files {
-				mpName := f.Name()
-				if mpName == "config.json" {
-					continue
-				}
-
-				chunkList = append(chunkList, mpName)
-				//fileBaseName := strings.Split(fileName, ".")[0]
-				if fileName == mpName {
-					fmt.Println(strMd5(hashPath + "/" + fileName))
-					state = 1
-				}
+			mp := &mpStruct{}
+			err = json.Unmarshal(bytes, mp)
+			if err != nil {
+				fmt.Println("解析数据失败", err)
+				return
 			}
-
+			//fmt.Printf("%+v\n", mp)
 			c.JSON(200, gin.H{
-				"state":     state,
-				"chunkList": chunkList,
+				"state":     mp.State,
+				"chunkList": mp.ChunkList,
 			})
 		} else {
 			c.JSON(200, gin.H{
 				"state":     0,
-				"chunkList": chunkList,
+				"chunkList": []string{},
 			})
 		}
+
 	})
 
 	router.POST("/uploadChunk", func(c *gin.Context) {
@@ -71,47 +70,51 @@ func main() {
 		if err != nil {
 			fmt.Println("获取hash路径错误", err)
 		}
-
+		mpJsonPath := fmt.Sprintf("%s/%s", hashPath, "mp.json")
 		if !isExistPath {
-			os.Mkdir(hashPath, os.ModePerm)
+			err := os.Mkdir(hashPath, os.ModePerm)
+			if err != nil {
+				fmt.Println("创建目录失败")
+			}
+			_, err = os.Create(mpJsonPath)
+			if err != nil {
+				fmt.Println("创建mpjson失败")
+			}
 		}
 
 		err = c.SaveUploadedFile(file, fmt.Sprintf("./uploadFile/%s/%s", fileHash, file.Filename))
-		if err != nil {
-			c.String(400, "0")
-			fmt.Println(err)
-		} else {
-			chunkList := []string{}
-			files, err := ioutil.ReadDir(hashPath)
+		isExistJson, err := PathExists(mpJsonPath)
+		if isExistJson {
+			//读取json
+			mp, err := rwJson(mpJsonPath, file.Filename)
 			if err != nil {
-				fmt.Println("文件读取错误", err)
+				fmt.Println("读取json失败！")
 			}
 
-			for _, f := range files {
-				fileName := f.Name()
-
-				if f.Name() == ".DS_Store" {
-					continue
-				}
-				chunkList = append(chunkList, fileName)
+			//mp.ChunkList = append(mp.ChunkList, file.Filename)
+			//fmt.Println(file.Filename)
+			//fmt.Printf("%+v \n",mp.ChunkList)
+			//bytes, err := json.Marshal(mp)
+			//err = ioutil.WriteFile(mpJsonPath, bytes, os.ModePerm)
+			//err=wJson(mpJsonPath,&bytes)
+			if err != nil {
+				fmt.Println("写入json错误")
 			}
-
 			c.JSON(200, gin.H{
-				"chunkList": chunkList,
+				"chunkList": mp.ChunkList,
 			})
 		}
+
 	})
 
 	router.GET("megerChunk", func(c *gin.Context) {
 		hash := c.Query("hash")
 		fileName := c.Query("fileName")
 		hashPath := fmt.Sprintf("./uploadFile/%s", hash)
-
 		isExistPath, err := PathExists(hashPath)
 		if err != nil {
 			fmt.Println("获取hash路径错误", err)
 		}
-
 		if !isExistPath {
 			c.JSON(400, gin.H{
 				"message": "文件夹不存在",
@@ -124,42 +127,39 @@ func main() {
 		}
 		fmt.Println("文件是否存在", isExistFile)
 		if isExistFile {
-			if strMd5(hashPath+"/"+fileName) != hash {
-				c.JSON(200, gin.H{
-					"fileUrl": "hash不一致",
-				})
-				return
-			}
 			c.JSON(200, gin.H{
 				"fileUrl": fmt.Sprintf("http://127.0.0.1:9999/uploadFile/%s/%s", hash, fileName),
 			})
 			return
 		}
+		mpJsonPath := hashPath + "/" + "mp.json"
+		mp := &mpStruct{}
+		bytes, err := ioutil.ReadFile(mpJsonPath)
+		err = json.Unmarshal(bytes, mp)
 
-		files, err := ioutil.ReadDir(hashPath)
+		//files, err := ioutil.ReadDir(hashPath)
+		files := len(mp.ChunkList)
 		if err != nil {
 			fmt.Println("合并文件读取失败", err)
 		}
 		complateFile, err := os.Create(hashPath + "/" + fileName)
 		defer complateFile.Close()
-		for _, f := range files {
-			//.DS_Store
-			//file, err := os.Open(hashPath + "/" + f.Name())
-			//if err != nil {
-			//	fmt.Println("文件打开错误", err)
-			//}
-
-			if f.Name() == ".DS_Store" {
-				continue
-			}
-
-			fileBuffer, err := ioutil.ReadFile(hashPath + "/" + f.Name())
+		for i := 0; i < files; i++ {
+			fileBuffer, err := ioutil.ReadFile(hashPath + "/" + strconv.Itoa(i))
 			if err != nil {
 				fmt.Println("文件打开错误", err)
 			}
 			complateFile.Write(fileBuffer)
 		}
-
+		newMD5 := strMd5(hashPath + "/" + fileName)
+		if hash == newMD5 {
+			fmt.Println("md5一致")
+		} else {
+			fmt.Println("md5不一致", newMD5, "!=", hash)
+		}
+		mp.State = 1
+		bytes, err = json.Marshal(mp)
+		err = ioutil.WriteFile(mpJsonPath, bytes, os.ModePerm)
 		c.JSON(200, gin.H{
 			"fileUrl": fmt.Sprintf("http://127.0.0.1:9999/uploadFile/%s/%s", hash, fileName),
 		})
@@ -195,4 +195,25 @@ func Cors(c *gin.Context) {
 	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 	c.Writer.Header().Add("Access-Control-Allow-Headers", "Content-Type")
 	c.Next()
+}
+func rwJson(path, fileName string) (*mpStruct, error) {
+	rwLock.Lock()         //获取写锁
+	defer rwLock.Unlock() //释放写锁
+	bytes, err := ioutil.ReadFile(path)
+	if err != nil {
+		fmt.Printf("%s读取错误", path)
+		return nil, err
+	}
+	mp := &mpStruct{}
+	err = json.Unmarshal(bytes, mp)
+	oldLen := len(mp.ChunkList)
+	mp.ChunkList = append(mp.ChunkList, fileName)
+
+	if len(mp.ChunkList) == oldLen {
+		fmt.Println(fileName)
+		fmt.Printf("%+v \n", mp.ChunkList)
+	}
+	bytes, err = json.Marshal(mp)
+	err = ioutil.WriteFile(path, bytes, os.ModePerm)
+	return mp, err
 }

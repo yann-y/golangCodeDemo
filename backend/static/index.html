@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>断点上传</title>
+    <!--引入JS-->
+    <script src="https://cdn.bootcss.com/jquery/3.4.1/jquery.js"></script>
+    <script src="https://cdn.bootcdn.net/ajax/libs/spark-md5/3.0.0/spark-md5.min.js"></script>
+</head>
+
+<body>
+<input type="file" id="file"/>
+</body>
+
+<script>
+    let fileHash = "";
+    document.querySelector('input').onchange = function (e) {
+        doIncrementalTest(this)
+    }
+
+    function upload(file) {
+        //console.log("34",fileHash)
+        //const file = this.files[0]
+        const sliceBuffer = []
+        const chunkRequests = []
+        checkFileChunkState(fileHash, file.name)
+            .then(res => {
+                let {chunkList, state} = res
+                if (state === 1) {
+                    alert("已经上传完成")
+                    return
+                }
+                chunkList = chunkList.map(e => parseInt(e))
+                console.log(chunkList)
+            })
+
+
+        let chunkSize = 1024 * 1024 * 2
+        const chunks = Math.ceil(file.size / chunkSize)
+        console.log(chunks)
+        let sliceSize = file.size
+        let i = 0;
+        while (sliceSize > chunkSize) {
+            const blobPart = file.slice(i * chunkSize, (i + 1) * chunkSize)
+            //sliceBuffer.push(
+            //    blobPart
+            //)
+            sliceSize -= chunkSize
+            const blob = new File([blobPart], `${i}`)
+            uploadFileChunk(fileHash, blob)
+                .then(res => {
+                    if (res.status === 200) {
+                        chunkRequests.push(i)
+                    }
+                    res.json()
+                }).then(res => {
+                console.log(res)
+                if (chunkRequests.length === chunks) {
+                    megerChunkFile(fileHash, file.name)
+                }
+            })
+            i++
+        }
+
+        if (sliceSize > 0) {
+            const blobPart = file.slice(i * chunkSize, file.size)
+            const blob = new File([blobPart], `${i}`)
+
+            uploadFileChunk(fileHash, blob)
+                .then(res => {
+                    if (res.status === 200) {
+                        chunkRequests.push(i)
+                    }
+                    res.json()
+                }).then(res => {
+                console.log(res)
+                if (chunkRequests.length === chunks) {
+                    megerChunkFile(fileHash, file.name)
+                }
+            })
+
+        }
+        const fileReader = new FileReader()
+        fileReader.onload = function (res) {
+            const result = fileReader.result
+
+        }
+        fileReader.onerror = function (err) {
+            console.log("报错了", err.target.error)
+        }
+        fileReader.readAsBinaryString(file)
+
+    }
+
+
+    //这里需要用到
+    function doIncrementalTest(input) {
+        var blobSlice = File.prototype.slice || File.prototype.mozSlice || File.prototype.webkitSlice,
+            file = input.files[0],
+            chunkSize = 1024 * 1024 * 20,                           // 以每片20MB大小来逐次读取
+            chunks = Math.ceil(file.size / chunkSize),
+            currentChunk = 0,
+            spark = new SparkMD5(),    //创建SparkMD5的实例
+            time,
+            fileReader = new FileReader();
+
+        fileReader.onload = function (e) {
+
+            console.log("Read chunk number ", currentChunk + 1, "of  ", chunks);
+
+            spark.appendBinary(e.target.result);                 // append array buffer
+            currentChunk += 1;
+
+
+            if (currentChunk < chunks) {
+                loadNext();
+            } else {
+                running = false;
+                fileHash = spark.end();
+                console.log("Finished loading!  fileHash", fileHash);
+                upload(file)  // 上传文件
+                return fileHash;     // 完成计算，返回结果
+            }
+        };
+
+        fileReader.onerror = function () {
+            running = false;
+            console.log("something went wrong");
+        };
+
+        function loadNext() {
+            var start = currentChunk * chunkSize,
+                end = start + chunkSize >= file.size ? file.size : start + chunkSize;
+
+            fileReader.readAsBinaryString(blobSlice.call(file, start, end));
+        }
+
+        running = true;
+        loadNext();
+    }
+
+    function uploadFileChunk(hash, file) {
+        let formData = new FormData
+        formData.append('file', file)
+        formData.append('hash', hash)
+        return fetch("http://127.0.0.1:9999/uploadChunk", {
+            method: "POST",
+            body: formData
+        })
+    }
+
+    function checkFileChunkState(hash, filename) {
+        return new Promise(resolve => {
+            fetch("http://127.0.0.1:9999/checkChunk?hash=" + hash + "&filename=" + filename)
+                .then(r => r.json())
+                .then(response => {
+                    resolve(response)
+                })
+        })
+    }
+
+    function megerChunkFile(hash, fileName) {
+        return new Promise(resolve => {
+            fetch(`http://127.0.0.1:9999/megerChunk?hash=${hash}&fileName=${fileName}`)
+                .then(r => r.json())
+                .then(r => {
+                    resolve(r)
+                })
+        })
+    }
+</script>
+</html>

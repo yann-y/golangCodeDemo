@@ -166,7 +166,11 @@ func main() {
 
 	})
 
-	router.Run("127.0.0.1:9999")
+	err := router.Run("127.0.0.1:9999")
+	if err != nil {
+		fmt.Println("服务启动失败")
+		return
+	}
 }
 
 func PathExists(path string) (bool, error) {
@@ -207,8 +211,15 @@ func rwJson(path, fileName string) (*mpStruct, error) {
 	mp := &mpStruct{}
 	err = json.Unmarshal(bytes, mp)
 	oldLen := len(mp.ChunkList)
-	mp.ChunkList = append(mp.ChunkList, fileName)
-
+	addTrue := true
+	for _, value := range mp.ChunkList {
+		if value == fileName {
+			addTrue = false
+		}
+	}
+	if addTrue {
+		mp.ChunkList = append(mp.ChunkList, fileName)
+	}
 	if len(mp.ChunkList) == oldLen {
 		fmt.Println(fileName)
 		fmt.Printf("%+v \n", mp.ChunkList)

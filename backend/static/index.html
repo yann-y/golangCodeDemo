@@ -23,7 +23,7 @@
         //const file = this.files[0]
         const sliceBuffer = []
         const chunkRequests = []
-        checkFileChunkState(fileHash, file.name)
+        checkFileChunkState(fileHash, file.name,file.size)
             .then(res => {
                 let {chunkList, state} = res
                 if (state === 1) {
@@ -33,53 +33,56 @@
                 chunkList = chunkList.map(e => parseInt(e))
                 console.log(chunkList)
             })
-
-
-        let chunkSize = 1024 * 1024 * 2
-        const chunks = Math.ceil(file.size / chunkSize)
-        console.log(chunks)
-        let sliceSize = file.size
-        let i = 0;
-        while (sliceSize > chunkSize) {
-            const blobPart = file.slice(i * chunkSize, (i + 1) * chunkSize)
-            //sliceBuffer.push(
-            //    blobPart
-            //)
-            sliceSize -= chunkSize
-            const blob = new File([blobPart], `${i}`)
-            uploadFileChunk(fileHash, blob)
-                .then(res => {
-                    if (res.status === 200) {
-                        chunkRequests.push(i)
+        .then(res => {
+            let chunkSize = 1024 * 1024 * 2
+            const chunks = Math.ceil(file.size / chunkSize)
+            console.log(chunks)
+            let sliceSize = file.size
+            let i = 0;
+            while (sliceSize > chunkSize) {
+                const blobPart = file.slice(i * chunkSize, (i + 1) * chunkSize)
+                //sliceBuffer.push(
+                //    blobPart
+                //)
+                sliceSize -= chunkSize
+                const blob = new File([blobPart], `${i}`)
+                uploadFileChunk(fileHash, blob)
+                    .then(res => {
+                        if (res.status === 200) {
+                            chunkRequests.push(i)
+                        }
+                        res.json()
+                    }).then(res => {
+                    console.log(res)
+                    if (chunkRequests.length === chunks) {
+                        megerChunkFile(fileHash, file.name)
                     }
-                    res.json()
-                }).then(res => {
-                console.log(res)
-                if (chunkRequests.length === chunks) {
-                    megerChunkFile(fileHash, file.name)
-                }
-            })
-            i++
-        }
+                })
+                i++
+            }
 
-        if (sliceSize > 0) {
-            const blobPart = file.slice(i * chunkSize, file.size)
-            const blob = new File([blobPart], `${i}`)
+            if (sliceSize > 0) {
+                const blobPart = file.slice(i * chunkSize, file.size)
+                const blob = new File([blobPart], `${i}`)
 
-            uploadFileChunk(fileHash, blob)
-                .then(res => {
-                    if (res.status === 200) {
-                        chunkRequests.push(i)
+                uploadFileChunk(fileHash, blob)
+                    .then(res => {
+                        if (res.status === 200) {
+                            chunkRequests.push(i)
+                        }
+                        res.json()
+                    }).then(res => {
+                    console.log(res)
+                    if (chunkRequests.length === chunks) {
+                        megerChunkFile(fileHash, file.name)
                     }
-                    res.json()
-                }).then(res => {
-                console.log(res)
-                if (chunkRequests.length === chunks) {
-                    megerChunkFile(fileHash, file.name)
-                }
-            })
+                })
 
-        }
+            }
+        })
+
+
+
         const fileReader = new FileReader()
         fileReader.onload = function (res) {
             const result = fileReader.result
@@ -149,9 +152,9 @@
         })
     }
 
-    function checkFileChunkState(hash, filename) {
+    function checkFileChunkState(hash, filename,fileSize) {
         return new Promise(resolve => {
-            fetch("http://127.0.0.1:9999/checkChunk?hash=" + hash + "&filename=" + filename)
+            fetch("http://127.0.0.1:9999/checkChunk?hash=" + hash + "&filename=" + filename+"&fileSize="+fileSize)
                 .then(r => r.json())
                 .then(response => {
                     resolve(response)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"io/ioutil"
+	"log"
 	"os"
 	"strconv"
 	"sync"
@@ -14,17 +15,31 @@ import (
 type mpStruct struct {
 	ChunkList []string `json:"chunkList"`
 	State     int      `json:"state"`
+	FileName  string   `json:"fileName"`
+	FileSize  int64    `json:"fileSize"`
 }
 
 var rwLock sync.RWMutex
 
+func createFile(fileSize int64, filePath string) {
+	f, err := os.Create(filePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+
+	if err := f.Truncate(fileSize); err != nil {
+		log.Fatal(err)
+	}
+}
 func main() {
 	router := gin.Default()
 	router.Use(Cors)
 	// 获取缓存信息
 	router.GET("/checkChunk", func(c *gin.Context) {
 		hash := c.Query("hash")
-		//fileName := c.Query("filename")
+		fileName := c.Query("filename")
+		fileSize := c.Query("fileSize")
 		hashPath := fmt.Sprintf("./uploadFile/%s", hash) // 缓存文件夹
 		mpJsonPath := fmt.Sprintf("%s/%s", hashPath, "mp.json")
 		isExistJson, err := PathExists(mpJsonPath)
@@ -49,11 +64,30 @@ func main() {
 				"state":     mp.State,
 				"chunkList": mp.ChunkList,
 			})
+			// 保存文件信息
+			mp.FileName = fileName
+			mp.FileSize, _ = strconv.ParseInt(fileSize, 10, 64)
+			bytes, err = json.Marshal(mp)
+			err = ioutil.WriteFile(mpJsonPath, bytes, os.ModePerm)
+			log.Println(err)
 		} else {
+
 			c.JSON(200, gin.H{
 				"state":     0,
 				"chunkList": []string{},
 			})
+			mp := &mpStruct{}
+			mp.State = 0
+			mp.ChunkList = []string{}
+			mp.FileSize, _ = strconv.ParseInt(fileSize, 10, 64)
+			mp.FileName = fileName
+			_, err := os.Create(fileName)
+			if err != nil {
+				fmt.Println("创建文件失败")
+			}
+			bytes, err := json.Marshal(mp)
+			err = ioutil.WriteFile(mpJsonPath, bytes, os.ModePerm)
+			fmt.Printf("%+v\n", mp)
 		}
 
 	})
@@ -61,6 +95,7 @@ func main() {
 	router.POST("/uploadChunk", func(c *gin.Context) {
 		fileHash := c.PostForm("hash")
 		file, err := c.FormFile("file")
+		//body := c.Request.Body
 		hashPath := fmt.Sprintf("./uploadFile/%s", fileHash)
 		if err != nil {
 			fmt.Println("获取上传文件失败", err)
@@ -90,13 +125,21 @@ func main() {
 			if err != nil {
 				fmt.Println("读取json失败！")
 			}
+			// start 不保存切片，直接偏移写入
+			//1.先判断文件是否存在，不存在创建文件
+			//filePath := fmt.Sprintf("./uploadFile/%s/%s", fileHash, mp.FileName)
+			//isExistFile, err := PathExists(filePath)
+			//if !isExistFile {
+			// 文件不存在创建空白文件
+			//	createFile(mp.FileSize, filePath)
+			//}
+			//fileLoad, _ := os.OpenFile(filePath, os.O_RDWR, 0)
+			//defer fileLoad.Close()
+			//i, _ := strconv.ParseInt(file.Filename, 10, 64)
+			//_, err = fileLoad.Seek(i*2*1024*1024, 0)
+			//fileLoad.Write(file.Open())
 
-			//mp.ChunkList = append(mp.ChunkList, file.Filename)
-			//fmt.Println(file.Filename)
-			//fmt.Printf("%+v \n",mp.ChunkList)
-			//bytes, err := json.Marshal(mp)
-			//err = ioutil.WriteFile(mpJsonPath, bytes, os.ModePerm)
-			//err=wJson(mpJsonPath,&bytes)
+			// end
 			if err != nil {
 				fmt.Println("写入json错误")
 			}
@@ -188,7 +231,12 @@ func strMd5(str string) (retMd5 string) {
 	if err != nil {
 		return "md5 Open file err"
 	}
-	defer f.Close()
+	defer func(f *os.File) {
+		err := f.Close()
+		if err != nil {
+			fmt.Println(err)
+		}
+	}(f)
 	body, err := ioutil.ReadAll(f)
 	if err != nil {
 		return "ioutil.ReadAll"
@@ -211,7 +259,7 @@ func rwJson(path, fileName string) (*mpStruct, error) {
 	mp := &mpStruct{}
 	err = json.Unmarshal(bytes, mp)
 	oldLen := len(mp.ChunkList)
-	addTrue := true
+	addTrue := true // 去重，改片段存在就不添加
 	for _, value := range mp.ChunkList {
 		if value == fileName {
 			addTrue = false

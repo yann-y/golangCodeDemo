@@ -171,5 +171,13 @@
                 })
         })
     }
+
+    function downloadFile(fileName){
+        fetch("http://127.0.0.1:9999/Download?fileName=1.txt",{
+            headers: {
+                'Range': ' bytes=800-1000',
+            }
+        })
+    }
 </script>
 </html>

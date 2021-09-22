@@ -208,7 +208,28 @@ func main() {
 		})
 
 	})
+	router.GET("/Download", func(con *gin.Context) {
+		//获取下载文件名称
+		fileName := con.Query("fileName")
+		filePath := "./uploadFile/" + fileName
+		// 检查文件是否存在
+		exists, _ := PathExists(filePath)
+		if !exists {
+			con.JSON(200, gin.H{
+				"msg": "文件不存在",
+			})
+			return
+		}
+		// 打开文件
+		file, _ := os.Open(filePath)
+		defer file.Close()
+		con.Header("Content-Type", "application/octet-stream")
+		con.Header("Content-Disposition", "attachment; filename="+fileName)
+		con.Header("Content-Transfer-Encoding", "binary")
+		con.File(filePath)
+		return
 
+	})
 	err := router.Run("127.0.0.1:9999")
 	if err != nil {
 		fmt.Println("服务启动失败")

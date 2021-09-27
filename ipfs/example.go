@@ -11,10 +11,10 @@ func main() {
 	// ignores errors for simplicity.
 	// don't do that at home.
 	// Decode a SHA1 hash to a binary buffer
-	buf, _ := hex.DecodeString("22a794a209ce515066ef6f193fcd7a17295a7005896e2cfbc7717655a24d5ada")
+	buf, _ := hex.DecodeString("0beec7b5ea3f0fdbc95d0dd47f3c5bc275da8a33")
 
 	// Create a new multihash with it.
-	mHashBuf, _ := multihash.EncodeName(buf, "sha2-256")
+	mHashBuf, _ := multihash.EncodeName(buf, "sha1")
 	// Print the multihash as hex string
 	fmt.Printf("hex: %s\n", hex.EncodeToString(mHashBuf))
 
